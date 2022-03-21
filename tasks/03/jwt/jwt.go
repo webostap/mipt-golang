@@ -1,10 +1,3 @@
-//package jwt
-//
-//import (
-//	"errors"
-//	"time"
-//)
-
 package jwt
 
 import (
@@ -15,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"hash"
 	"time"
 )
@@ -37,13 +29,7 @@ var (
 )
 
 func Encode(data interface{}, opts ...Option) ([]byte, error) {
-	xType := fmt.Sprintf("%T", data)
-	fmt.Println(xType)
-	var conf config
-	for _, opt := range opts {
-		opt(&conf)
-	}
-
+	conf := ReadOptions(opts)
 	now := timeFunc()
 	if conf.Expires != nil && (conf.TTL != nil || conf.Expires.Before(now)) {
 		return nil, ErrConfigurationMalformed
@@ -53,23 +39,16 @@ func Encode(data interface{}, opts ...Option) ([]byte, error) {
 		"alg": "HS256",
 		"typ": "JWT",
 	}
-	var hf func() hash.Hash
-	switch conf.SignMethod {
-	case HS256:
-		hf = sha256.New
-		headerI["alg"] = HS256
-	case HS512:
-		hf = sha512.New
-		headerI["alg"] = HS512
-	default:
+	hf, err := GetSignMethod(conf.SignMethod)
+	if err != nil {
 		return nil, ErrInvalidSignMethod
 	}
+	headerI["alg"] = conf.SignMethod
 
 	payloadI := map[string]interface{}{
 		"d":   data,
 		"exp": float64(0),
 	}
-
 	if conf.Expires != nil {
 		payloadI["exp"] = conf.Expires.Unix()
 	} else if conf.TTL != nil {
@@ -82,16 +61,14 @@ func Encode(data interface{}, opts ...Option) ([]byte, error) {
 	payload, _ := json.Marshal(payloadI)
 
 	var token bytes.Buffer
-
 	token.WriteString(base64.RawURLEncoding.EncodeToString(header))
 	token.WriteString(".")
 	token.WriteString(base64.RawURLEncoding.EncodeToString(payload))
 
-	h := hmac.New(hf, conf.Key)
-	h.Write(token.Bytes())
+	sig := GetHmac(hf, token.Bytes(), conf.Key)
 
 	token.WriteString(".")
-	token.WriteString(base64.RawURLEncoding.EncodeToString(h.Sum(nil)))
+	token.Write(sig)
 
 	return token.Bytes(), nil
 }
@@ -102,12 +79,10 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 	if len(parts) != 3 {
 		return ErrInvalidToken
 	}
-	fmt.Println(string(parts[0]))
 	header, err := Base64toMap(parts[0])
 	if err != nil {
 		return ErrInvalidToken
 	}
-	fmt.Println(string(parts[1]))
 
 	payload, err := Base64toMap(parts[1])
 	if err != nil {
@@ -121,37 +96,22 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 		return ErrInvalidToken
 	}
 
-	var conf config
-	for _, opt := range opts {
-		opt(&conf)
-	}
+	conf := ReadOptions(opts)
 
 	if header["alg"] != string(conf.SignMethod) {
 		return ErrSignMethodMismatched
 	}
-	var hf func() hash.Hash
-	switch conf.SignMethod {
-	case HS256:
-		hf = sha256.New
-	case HS512:
-		hf = sha512.New
-	default:
+	hf, err := GetSignMethod(conf.SignMethod)
+	if err != nil {
 		return ErrInvalidSignMethod
 	}
 
 	var hap bytes.Buffer
-
 	hap.Write(parts[0])
 	hap.WriteString(".")
 	hap.Write(parts[1])
 
-	h := hmac.New(hf, conf.Key)
-	h.Write(hap.Bytes())
-
-	hs := h.Sum(nil)
-	sig := make([]byte, base64.RawURLEncoding.EncodedLen(len(hs)))
-	base64.RawURLEncoding.Encode(sig, hs)
-	fmt.Println(string(sig))
+	sig := GetHmac(hf, hap.Bytes(), conf.Key)
 
 	if bytes.Compare(sig, parts[2]) != 0 {
 		return ErrSignatureInvalid
@@ -166,6 +126,13 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 
 	return nil
 }
+func ReadOptions(opts []Option) config {
+	var conf config
+	for _, opt := range opts {
+		opt(&conf)
+	}
+	return conf
+}
 
 func Base64toMap(tok []byte) (map[string]interface{}, error) {
 	dst := make([]byte, base64.RawURLEncoding.DecodedLen(len(tok)))
@@ -179,6 +146,26 @@ func Base64toMap(tok []byte) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return result, nil
+}
+func GetSignMethod(SignMethod SignMethod) (func() hash.Hash, error) {
+	switch SignMethod {
+	case HS256:
+		return sha256.New, nil
+	case HS512:
+		return sha512.New, nil
+	default:
+		return nil, ErrInvalidSignMethod
+	}
+}
+func GetHmac(hf func() hash.Hash, data []byte, secret []byte) []byte {
+	h := hmac.New(hf, secret)
+	h.Write(data)
+
+	hs := h.Sum(nil)
+	sig := make([]byte, base64.RawURLEncoding.EncodedLen(len(hs)))
+	base64.RawURLEncoding.Encode(sig, hs)
+
+	return sig
 }
 
 // To mock time in tests
