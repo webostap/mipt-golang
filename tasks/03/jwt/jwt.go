@@ -123,7 +123,6 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 			return ErrTokenExpired
 		}
 	}
-
 	return nil
 }
 func readOptions(opts []Option) config {
