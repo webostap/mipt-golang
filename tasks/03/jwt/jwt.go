@@ -29,7 +29,7 @@ var (
 )
 
 func Encode(data interface{}, opts ...Option) ([]byte, error) {
-	conf := ReadOptions(opts)
+	conf := readOptions(opts)
 	now := timeFunc()
 	if conf.Expires != nil && (conf.TTL != nil || conf.Expires.Before(now)) {
 		return nil, ErrConfigurationMalformed
@@ -39,7 +39,7 @@ func Encode(data interface{}, opts ...Option) ([]byte, error) {
 		"alg": "HS256",
 		"typ": "JWT",
 	}
-	hf, err := GetSignMethod(conf.SignMethod)
+	hf, err := getSignMethod(conf.SignMethod)
 	if err != nil {
 		return nil, ErrInvalidSignMethod
 	}
@@ -65,7 +65,7 @@ func Encode(data interface{}, opts ...Option) ([]byte, error) {
 	token.WriteString(".")
 	token.WriteString(base64.RawURLEncoding.EncodeToString(payload))
 
-	sig := GetHmac(hf, token.Bytes(), conf.Key)
+	sig := getHmac(hf, token.Bytes(), conf.Key)
 
 	token.WriteString(".")
 	token.Write(sig)
@@ -79,12 +79,12 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 	if len(parts) != 3 {
 		return ErrInvalidToken
 	}
-	header, err := Base64toMap(parts[0])
+	header, err := base64toMap(parts[0])
 	if err != nil {
 		return ErrInvalidToken
 	}
 
-	payload, err := Base64toMap(parts[1])
+	payload, err := base64toMap(parts[1])
 	if err != nil {
 		return ErrInvalidToken
 	}
@@ -96,12 +96,12 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 		return ErrInvalidToken
 	}
 
-	conf := ReadOptions(opts)
+	conf := readOptions(opts)
 
 	if header["alg"] != string(conf.SignMethod) {
 		return ErrSignMethodMismatched
 	}
-	hf, err := GetSignMethod(conf.SignMethod)
+	hf, err := getSignMethod(conf.SignMethod)
 	if err != nil {
 		return ErrInvalidSignMethod
 	}
@@ -111,7 +111,7 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 	hap.WriteString(".")
 	hap.Write(parts[1])
 
-	sig := GetHmac(hf, hap.Bytes(), conf.Key)
+	sig := getHmac(hf, hap.Bytes(), conf.Key)
 
 	if bytes.Compare(sig, parts[2]) != 0 {
 		return ErrSignatureInvalid
@@ -123,10 +123,9 @@ func Decode(token []byte, data interface{}, opts ...Option) error {
 			return ErrTokenExpired
 		}
 	}
-
 	return nil
 }
-func ReadOptions(opts []Option) config {
+func readOptions(opts []Option) config {
 	var conf config
 	for _, opt := range opts {
 		opt(&conf)
@@ -134,7 +133,7 @@ func ReadOptions(opts []Option) config {
 	return conf
 }
 
-func Base64toMap(tok []byte) (map[string]interface{}, error) {
+func base64toMap(tok []byte) (map[string]interface{}, error) {
 	dst := make([]byte, base64.RawURLEncoding.DecodedLen(len(tok)))
 	_, err := base64.RawURLEncoding.Decode(dst, tok)
 	if err != nil {
@@ -147,7 +146,7 @@ func Base64toMap(tok []byte) (map[string]interface{}, error) {
 	}
 	return result, nil
 }
-func GetSignMethod(SignMethod SignMethod) (func() hash.Hash, error) {
+func getSignMethod(SignMethod SignMethod) (func() hash.Hash, error) {
 	switch SignMethod {
 	case HS256:
 		return sha256.New, nil
@@ -157,7 +156,7 @@ func GetSignMethod(SignMethod SignMethod) (func() hash.Hash, error) {
 		return nil, ErrInvalidSignMethod
 	}
 }
-func GetHmac(hf func() hash.Hash, data []byte, secret []byte) []byte {
+func getHmac(hf func() hash.Hash, data []byte, secret []byte) []byte {
 	h := hmac.New(hf, secret)
 	h.Write(data)
 
