@@ -2,11 +2,20 @@ package middleware
 
 import (
 	"net/http"
+	"sync"
 )
 
 func Limit(l Limiter) func(http.Handler) http.Handler {
-	// TODO: Implement me
-	return nil
+	return func(handler http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if l.TryAcquire() {
+				handler.ServeHTTP(w, req)
+				l.Release()
+			} else {
+				w.WriteHeader(http.StatusTooManyRequests)
+			}
+		})
+	}
 }
 
 type Limiter interface {
@@ -15,37 +24,50 @@ type Limiter interface {
 }
 
 type MutexLimiter struct {
-	// TODO: Implement me
+	cons  int
+	maxC  int
+	mutex sync.Mutex
 }
 
 func NewMutexLimiter(count int) *MutexLimiter {
-	// TODO: Implement me
-	return nil
+	return &MutexLimiter{maxC: count}
 }
 
 func (l *MutexLimiter) TryAcquire() bool {
-	// TODO: Implement me
-	return false
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.cons < l.maxC {
+		l.cons += 1
+		return true
+	} else {
+		return false
+	}
 }
 
 func (l *MutexLimiter) Release() {
-	// TODO: Implement me
+	l.mutex.Lock()
+	l.cons -= 1
+	l.mutex.Unlock()
 }
 
 type ChanLimiter struct {
-	// TODO: Implement me
+	limit chan int
 }
 
 func NewChanLimiter(count int) *ChanLimiter {
-	// TODO: Implement me
-	return nil
+	return &ChanLimiter{limit: make(chan int, count)}
 }
 
 func (l *ChanLimiter) TryAcquire() bool {
-	// TODO: Implement me
-	return false
+	select {
+	case l.limit <- 1:
+		return true
+	default:
+		return false
+	}
 }
 
 func (l *ChanLimiter) Release() {
-	// TODO: Implement me
+	<-l.limit
 }
