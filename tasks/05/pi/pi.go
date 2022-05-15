@@ -28,7 +28,6 @@ func CalculatePi(concurrent, iterations int, gen RandomPointGenerator) float64 {
 	wg.Wait()
 
 	return float64(len(acc)*4) / float64(iterations)
-
 }
 
 type RandomPointGenerator interface {
